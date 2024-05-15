@@ -1,16 +1,16 @@
-#[macro_use] extern crate rocket;
+#[macro_use]
+extern crate rocket;
 
 use anyhow::anyhow;
-use reqwest;
 use reqwest::header::{HeaderMap, HeaderValue, CONTENT_TYPE, COOKIE};
 use reqwest::{Client, Error, Response};
-use rocket::serde::{Deserialize, Serialize};
+use rocket::log::private::{debug, error, info};
 use rocket::serde::json::serde_json::{self, json};
+use rocket::serde::json::Json;
 use rocket::serde::uuid::Uuid;
-use rocket::log::private::{info, debug, error};
+use rocket::serde::{Deserialize, Serialize};
 use std::cmp::PartialEq;
 use std::collections::HashMap;
-use rocket::serde::json::Json;
 
 enum RPCMethods {
     Authenticate,
@@ -35,7 +35,7 @@ async fn request(
     let uid = Uuid::new_v4();
 
     let body = Body {
-        id: uid.clone(),
+        id: uid,
         method: match method {
             RPCMethods::Authenticate => "authenticate",
             RPCMethods::Logout => "logout",
@@ -45,7 +45,11 @@ async fn request(
     };
 
     let mut request = client
-        .post(format!("https://{}/WebUntis/jsonrpc.do?school={}", std::env::var("UNTIS_HOST").expect("'UNTIS_HOST' not defined!"), std::env::var("UNTIS_SCHOOL").expect("'UNTIS_SCHOOL' not defined!")))
+        .post(format!(
+            "https://{}/WebUntis/jsonrpc.do?school={}",
+            std::env::var("UNTIS_HOST").expect("'UNTIS_HOST' not defined!"),
+            std::env::var("UNTIS_SCHOOL").expect("'UNTIS_SCHOOL' not defined!")
+        ))
         .json(&body);
 
     if let Some(id) = jsession_id {
@@ -128,16 +132,16 @@ struct OriginalRoom {
     room_capacity: u64,
 }
 
-impl Into<OriginalRoom> for &OriginalRoom {
-    fn into(self) -> OriginalRoom {
-        OriginalRoom {
-            id: self.id,
-            name: String::from(&self.name),
-            long_name: String::from(&self.long_name),
-            displayname: String::from(&self.displayname),
-            alternatename: String::from(&self.alternatename),
-            can_view_timetable: self.can_view_timetable,
-            room_capacity: self.room_capacity,
+impl From<&OriginalRoom> for OriginalRoom {
+    fn from(val: &OriginalRoom) -> Self {
+        Self {
+            id: val.id,
+            name: String::from(&val.name),
+            long_name: String::from(&val.long_name),
+            displayname: String::from(&val.displayname),
+            alternatename: String::from(&val.alternatename),
+            can_view_timetable: val.can_view_timetable,
+            room_capacity: val.room_capacity,
         }
     }
 }
@@ -175,14 +179,14 @@ struct OriginalTeacher {
     room_capacity: u64,
 }
 
-impl Into<OriginalTeacher> for &OriginalTeacher {
-    fn into(self) -> OriginalTeacher {
-        OriginalTeacher {
-            id: self.id,
-            name: self.name.to_string(),
-            can_view_timetable: self.can_view_timetable,
-            extern_key: self.extern_key.to_string(),
-            room_capacity: self.room_capacity,
+impl From<&OriginalTeacher> for OriginalTeacher {
+    fn from(val: &OriginalTeacher) -> Self {
+        Self {
+            id: val.id,
+            name: val.name.to_string(),
+            can_view_timetable: val.can_view_timetable,
+            extern_key: val.extern_key.to_string(),
+            room_capacity: val.room_capacity,
         }
     }
 }
@@ -226,21 +230,18 @@ struct OriginalSubject {
     fore_color: Option<String>,
 }
 
-impl Into<OriginalSubject> for &OriginalSubject {
-    fn into(self) -> OriginalSubject {
+impl From<&OriginalSubject> for OriginalSubject {
+    fn from(val: &OriginalSubject) -> Self {
         OriginalSubject {
-            id: self.id,
-            name: String::from(&self.name),
-            long_name: String::from(&self.long_name),
-            display_name: String::from(&self.display_name),
-            alternate_name: String::from(&self.alternate_name),
-            back_color: String::from(&self.back_color),
-            can_view_timetable: self.can_view_timetable,
-            room_capacity: self.room_capacity,
-            fore_color: match &self.fore_color {
-                None => None,
-                Some(f) => Some(String::from(f)),
-            },
+            id: val.id,
+            name: String::from(&val.name),
+            long_name: String::from(&val.long_name),
+            display_name: String::from(&val.display_name),
+            alternate_name: String::from(&val.alternate_name),
+            back_color: String::from(&val.back_color),
+            can_view_timetable: val.can_view_timetable,
+            room_capacity: val.room_capacity,
+            fore_color: val.fore_color.as_ref().map(String::from),
         }
     }
 }
@@ -303,88 +304,81 @@ struct Period {
 
 impl Period {
     fn speakable_text(&self) -> String {
-        return match &self.subject {
-            Some(subject) => {
-                match self.state {
-                    PeriodState::Cancel => {
-                        return format!(
-                            "{} fällt zwischen {} und {} Uhr aus!",
-                            subject.long_name,
-                            self.start_time.format("%H:%M"),
-                            self.end_time.format("%H:%M"),
-                        )
-                    }
-                    PeriodState::Standard => format!(
-                        "Im Fach {} zwischen {} und {} Uhr gibt es keine Änderungen!",
+        match &self.subject {
+            Some(subject) => match self.state {
+                PeriodState::Cancel => {
+                    return format!(
+                        "{} fällt zwischen {} und {} Uhr aus!",
                         subject.long_name,
                         self.start_time.format("%H:%M"),
                         self.end_time.format("%H:%M"),
-                    ),
-                    PeriodState::Substitution => {
-                        let mut out = format!("Änderung bei {} zwischen {} und {} Uhr: ",
-                                              subject.long_name,
-                                              self.start_time.format("%H:%M"),
-                                              self.end_time.format("%H:%M"),
-                        );
-                        if let Some(teacher) = &self.teacher {
-                            match teacher.state {
-                                ElementState::Regular => {},
-                                ElementState::Absent => {
-                                    match &teacher.original_teacher {
-                                        None => {},
-                                        Some(original_teacher) => out.push_str(&format!(
-                                            "Unterricht ohne Lehrer (von '{}'); ",
-                                            original_teacher.name,
-                                        )),
-                                    }
-                                }
-                                ElementState::Substituted => {
-                                    match &teacher.original_teacher {
-                                        None => {},
-                                        Some(original_teacher) => out.push_str(&format!(
-                                            "Lehrerwechsel von '{}' zu '{}'; ",
-                                            original_teacher.name,
-                                            teacher.name,
-                                        )),
-                                    }
-                                }
-                            };
-                        }
-                        if let Some(room) = &self.room {
-                            match room.state {
-                                ElementState::Regular => {},
-                                ElementState::Absent => {
-                                    match &room.original_room {
-                                        None => {},
-                                        Some(original_room) => out.push_str(&format!(
-                                            "Unterricht ohne Raum (von '{}'); ",
-                                            original_room.long_name,
-                                        )),
-                                    }
-                                }
-                                ElementState::Substituted => {
-                                    match &room.original_room {
-                                        None => {},
-                                        Some(original_room) => out.push_str(&format!(
-                                            "Raumwechsel von '{}' zu '{}'; ",
-                                            original_room.long_name,
-                                            room.long_name,
-                                        )),
-                                    }
-                                }
-                            }
-                        }
-                        out.push_str(&self.substitution_text);
-                        out
-                    }
+                    )
                 }
-            }
+                PeriodState::Standard => format!(
+                    "Im Fach {} zwischen {} und {} Uhr gibt es keine Änderungen!",
+                    subject.long_name,
+                    self.start_time.format("%H:%M"),
+                    self.end_time.format("%H:%M"),
+                ),
+                PeriodState::Substitution => {
+                    let mut out = format!(
+                        "Änderung bei {} zwischen {} und {} Uhr: ",
+                        subject.long_name,
+                        self.start_time.format("%H:%M"),
+                        self.end_time.format("%H:%M"),
+                    );
+                    if let Some(teacher) = &self.teacher {
+                        match teacher.state {
+                            ElementState::Regular => {}
+                            ElementState::Absent => match &teacher.original_teacher {
+                                None => {}
+                                Some(original_teacher) => out.push_str(&format!(
+                                    "Unterricht ohne Lehrer (von '{}'); ",
+                                    original_teacher.name,
+                                )),
+                            },
+                            ElementState::Substituted => match &teacher.original_teacher {
+                                None => {}
+                                Some(original_teacher) => out.push_str(&format!(
+                                    "Lehrerwechsel von '{}' zu '{}'; ",
+                                    original_teacher.name, teacher.name,
+                                )),
+                            },
+                        };
+                    }
+                    if let Some(room) = &self.room {
+                        match room.state {
+                            ElementState::Regular => {}
+                            ElementState::Absent => match &room.original_room {
+                                None => {}
+                                Some(original_room) => out.push_str(&format!(
+                                    "Unterricht ohne Raum (von '{}'); ",
+                                    original_room.long_name,
+                                )),
+                            },
+                            ElementState::Substituted => match &room.original_room {
+                                None => {}
+                                Some(original_room) => out.push_str(&format!(
+                                    "Raumwechsel von '{}' zu '{}'; ",
+                                    original_room.long_name, room.long_name,
+                                )),
+                            },
+                        }
+                    }
+                    out.push_str(&self.substitution_text);
+                    out
+                }
+            },
             None => String::new(),
         }
     }
 }
 
-async fn get_timetable(client: &Client, session_id: &str, person_id: u64) -> Result<serde_json::Value, Error> {
+async fn get_timetable(
+    client: &Client,
+    session_id: &str,
+    person_id: u64,
+) -> Result<serde_json::Value, Error> {
     let response = client.get(
         format!("https://ikarus.webuntis.com/WebUntis/api/public/timetable/weekly/data?elementType=5&elementId={}&date={}&formatId=1", person_id, chrono::Local::now().format("%Y-%m-%d")),
     ).header(COOKIE, format!("JSESSIONID={}", session_id))
@@ -688,14 +682,23 @@ async fn speakable(user: Json<UsernamePassword>) -> String {
     let mut headers = HeaderMap::new();
     headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
     let client = Client::builder()
-        .user_agent(concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION")))
+        .user_agent(concat!(
+            env!("CARGO_PKG_NAME"),
+            "/",
+            env!("CARGO_PKG_VERSION")
+        ))
         .default_headers(headers)
-        .build().unwrap();
+        .build()
+        .unwrap();
 
     info!("Logging in as {}...", &user.username);
-    let userinfo = login(&client, &user.username, &user.password).await.unwrap();
+    let userinfo = login(&client, &user.username, &user.password)
+        .await
+        .unwrap();
     info!("Retrieving timetable...");
-    let timetable = get_timetable(&client, &userinfo.session_id, userinfo.person_id).await.unwrap();
+    let timetable = get_timetable(&client, &userinfo.session_id, userinfo.person_id)
+        .await
+        .unwrap();
     info!("Logging out...");
     logout(&client, &userinfo.session_id).await.unwrap();
 
