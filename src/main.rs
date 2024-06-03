@@ -277,6 +277,7 @@ struct Subject {
 enum PeriodState {
     Standard,
     Substitution,
+    RoomSubstitution,
     Cancel,
 }
 
@@ -307,7 +308,7 @@ impl Period {
         match &self.subject {
             Some(subject) => match self.state {
                 PeriodState::Cancel => {
-                    return format!(
+                    format!(
                         "{} fällt zwischen {} und {} Uhr aus!",
                         subject.long_name,
                         self.start_time.format("%H:%M"),
@@ -368,6 +369,26 @@ impl Period {
                     out.push_str(&self.substitution_text);
                     out
                 }
+                PeriodState::RoomSubstitution => {
+                    let room = self.room.as_ref().unwrap();
+                    match room.state {
+                        ElementState::Regular => String::new(),
+                        ElementState::Absent => match &room.original_room {
+                            None => String::new(),
+                            Some(original_room) => format!(
+                                "Unterricht ohne Raum (von '{}'); ",
+                                original_room.long_name,
+                            ),
+                        },
+                        ElementState::Substituted => match &room.original_room {
+                            None => String::new(),
+                            Some(original_room) => format!(
+                                "Raumwechsel von '{}' zu '{}'; ",
+                                original_room.long_name, room.long_name,
+                            ),
+                        },
+                    }
+                }
             },
             None => String::new(),
         }
@@ -379,9 +400,12 @@ async fn get_timetable(
     session_id: &str,
     person_id: u64,
 ) -> Result<serde_json::Value, Error> {
-    let response = client.get(
-        format!("https://ikarus.webuntis.com/WebUntis/api/public/timetable/weekly/data?elementType=5&elementId={}&date={}&formatId=1", person_id, chrono::Local::now().format("%Y-%m-%d")),
-    ).header(COOKIE, format!("JSESSIONID={}", session_id))
+    let response = client.get(format!(
+            "https://{}/WebUntis/api/public/timetable/weekly/data?elementType=5&elementId={}&date={}&formatId=1",
+            std::env::var("UNTIS_HOST").expect("'UNTIS_HOST' not defined!"),
+            person_id,
+            chrono::Local::now().format("%Y-%m-%d")
+    )).header(COOKIE, format!("JSESSIONID={}", session_id))
         .send()
         .await?;
     let data: serde_json::Value = response.json().await?;
@@ -609,6 +633,7 @@ fn parse_timetable(timetable: serde_json::Value, person_id: u64) -> anyhow::Resu
             "CANCEL" => PeriodState::Cancel,
             "STANDARD" => PeriodState::Standard,
             "SUBSTITUTION" => PeriodState::Substitution,
+            "ROOMSUBSTITUTION" => PeriodState::RoomSubstitution,
             _ => return Err(anyhow!("Unknown type of 'cellState' {period}")),
         };
         serialized_periods.push(Period {
