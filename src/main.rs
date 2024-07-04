@@ -279,6 +279,7 @@ enum PeriodState {
     Substitution,
     RoomSubstitution,
     Cancel,
+    Additional,
 }
 
 #[derive(Serialize, Debug)]
@@ -370,25 +371,38 @@ impl Period {
                     out
                 }
                 PeriodState::RoomSubstitution => {
+                    let mut out = format!(
+                        "Änderung bei {} zwischen {} und {} Uhr: ",
+                        subject.long_name,
+                        self.start_time.format("%H:%M"),
+                        self.end_time.format("%H:%M"),
+                    );
                     let room = self.room.as_ref().unwrap();
                     match room.state {
-                        ElementState::Regular => String::new(),
+                        ElementState::Regular => {},
                         ElementState::Absent => match &room.original_room {
-                            None => String::new(),
-                            Some(original_room) => format!(
+                            None => {},
+                            Some(original_room) => out.push_str(&format!(
                                 "Unterricht ohne Raum (von '{}'); ",
                                 original_room.long_name,
-                            ),
+                            ))
                         },
                         ElementState::Substituted => match &room.original_room {
-                            None => String::new(),
-                            Some(original_room) => format!(
+                            None => {},
+                            Some(original_room) => out.push_str(&format!(
                                 "Raumwechsel von '{}' zu '{}'; ",
-                                original_room.long_name, room.long_name,
-                            ),
+                                original_room.long_name, room.long_name
+                            ))
                         },
-                    }
-                }
+                    };
+                    out
+                },
+                PeriodState::Additional => format!(
+                    "'{}' findet als Event statt von {} bis {} Uhr.",
+                    self.substitution_text,
+                    self.start_time.format("%H:%M"),
+                    self.end_time.format("%H:%M"),
+                ),
             },
             None => String::new(),
         }
@@ -634,6 +648,7 @@ fn parse_timetable(timetable: serde_json::Value, person_id: u64) -> anyhow::Resu
             "STANDARD" => PeriodState::Standard,
             "SUBSTITUTION" => PeriodState::Substitution,
             "ROOMSUBSTITUTION" => PeriodState::RoomSubstitution,
+            "ADDITIONAL" => PeriodState::Additional,
             _ => return Err(anyhow!("Unknown type of 'cellState' {period}")),
         };
         serialized_periods.push(Period {
