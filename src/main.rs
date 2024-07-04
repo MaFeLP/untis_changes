@@ -280,6 +280,7 @@ enum PeriodState {
     RoomSubstitution,
     Cancel,
     Additional,
+    SubstitutionText,
 }
 
 #[derive(Serialize, Debug)]
@@ -402,6 +403,13 @@ impl Period {
                     self.substitution_text,
                     self.start_time.format("%H:%M"),
                     self.end_time.format("%H:%M"),
+                ),
+                PeriodState::SubstitutionText => format!(
+                    "Zusätzliche Information zu {} von {} bis {} Uhr: {}.",
+                    subject.long_name,
+                    self.start_time.format("%H:%M"),
+                    self.end_time.format("%H:%M"),
+                    self.substitution_text,
                 ),
             },
             None => String::new(),
@@ -649,6 +657,7 @@ fn parse_timetable(timetable: serde_json::Value, person_id: u64) -> anyhow::Resu
             "SUBSTITUTION" => PeriodState::Substitution,
             "ROOMSUBSTITUTION" => PeriodState::RoomSubstitution,
             "ADDITIONAL" => PeriodState::Additional,
+            "SUBST_TEXT" => PeriodState::SubstitutionText,
             _ => return Err(anyhow!("Unknown type of 'cellState' {period}")),
         };
         serialized_periods.push(Period {
