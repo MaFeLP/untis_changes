@@ -379,24 +379,24 @@ impl Period {
                     );
                     let room = self.room.as_ref().unwrap();
                     match room.state {
-                        ElementState::Regular => {},
+                        ElementState::Regular => {}
                         ElementState::Absent => match &room.original_room {
-                            None => {},
+                            None => {}
                             Some(original_room) => out.push_str(&format!(
                                 "Unterricht ohne Raum (von '{}'); ",
                                 original_room.long_name,
-                            ))
+                            )),
                         },
                         ElementState::Substituted => match &room.original_room {
-                            None => {},
+                            None => {}
                             Some(original_room) => out.push_str(&format!(
                                 "Raumwechsel von '{}' zu '{}'; ",
                                 original_room.long_name, room.long_name
-                            ))
+                            )),
                         },
                     };
                     out
-                },
+                }
                 PeriodState::Additional => format!(
                     "'{}' findet als Event statt von {} bis {} Uhr.",
                     self.substitution_text,
